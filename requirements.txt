@@ -3,6 +3,6 @@ flask-socketio==5.3.4
 python-dotenv==1.0.0
 flax==0.7.0
 jax==0.4.13
-jaxlib==0.4.13
+jaxlib==0.4.34
 numpy==1.25.2
 Pillow==10.0.0
