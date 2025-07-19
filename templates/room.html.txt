@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flax Video Chat - Room {{ room_id }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                <h1>Flax Video Chat</h1>
+            </div>
+            <div class="room-info">
+                <i class="fas fa-users"></i>
+                <span>Room: {{ room_id }} | <span id="userCount">1</span> Users</span>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <div class="video-box">
+                        <div class="video-header">
+                            <i class="fas fa-user"></i>
+                            <span>You (<span id="usernameDisplay">User</span>)</span>
+                        </div>
+                        <video id="localVideo" autoplay muted playsinline></video>
+                    </div>
+                    <div class="video-box">
+                        <div class="video-header">
+                            <i class="fas fa-user"></i>
+                            <span id="remoteUsername">Remote User</span>
+                        </div>
+                        <video id="remoteVideo" autoplay playsinline></video>
+                    </div>
+                </div>
+                
+                <div class="flax-processor">
+                    <div class="flax-header">
+                        <i class="fas fa-cogs"></i>
+                        <h3>Flax Video Processing</h3>
+                    </div>
+                    <div class="flax-options">
+                        <button class="flax-btn active" data-filter="none">
+                            <i class="fas fa-ban"></i> No Filter
+                        </button>
+                        <button class="flax-btn" data-filter="grayscale">
+                            <i class="fas fa-snowflake"></i> Grayscale
+                        </button>
+                        <button class="flax-btn" data-filter="sepia">
+                            <i class="fas fa-fire"></i> Sepia
+                        </button>
+                        <button class="flax-btn" data-filter="invert">
+                            <i class="fas fa-moon"></i> Invert
+                        </button>
+                        <button class="flax-btn" data-filter="edges">
+                            <i class="fas fa-drafting-compass"></i> Edge Detection
+                        </button>
+                    </div>
+                    <div class="flax-info">
+                        <p><i class="fas fa-info-circle"></i> <span id="filterInfo">No filter applied</span></p>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <div class="control-btn" title="Mute Audio" id="muteAudio">
+                        <i class="fas fa-microphone"></i>
+                    </div>
+                    <div class="control-btn" title="Turn Off Video" id="toggleVideo">
+                        <i class="fas fa-video"></i>
+                    </div>
+                    <div class="control-btn" title="Share Screen" id="shareScreen">
+                        <i class="fas fa-desktop"></i>
+                    </div>
+                    <div class="control-btn end-call" title="End Call" id="endCall">
+                        <i class="fas fa-phone-slash"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-section">
+                <div class="chat-header">
+                    <i class="fas fa-comments"></i>
+                    <h3>Chat</h3>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <!-- Messages will appear here -->
+                </div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type your message...">
+                    <button id="sendMessage">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Include Font Awesome for icons -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <script src="/static/script.js"></script>
+</body>
+</html>

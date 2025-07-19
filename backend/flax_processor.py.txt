@@ -1,0 +1,66 @@
+# backend/flax_processor.py
+import base64
+import numpy as np
+from io import BytesIO
+from PIL import Image
+import jax
+import jax.numpy as jnp
+from flax import linen as nn
+
+# Placeholder for actual Flax model
+class VideoProcessor(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+        # This would be replaced with actual Flax model
+        # For demo purposes, we'll apply simple filters
+        return x
+
+def apply_filter(image, filter_type='none'):
+    """Apply filter to image (placeholder for actual Flax processing)"""
+    img_array = np.array(image)
+    
+    if filter_type == 'grayscale':
+        # Convert to grayscale
+        gray = np.dot(img_array[...,:3], [0.2989, 0.5870, 0.1140])
+        img_array = np.stack([gray, gray, gray], axis=-1)
+    elif filter_type == 'sepia':
+        # Apply sepia filter
+        sepia_matrix = np.array([
+            [0.393, 0.769, 0.189],
+            [0.349, 0.686, 0.168],
+            [0.272, 0.534, 0.131]
+        ])
+        img_array = np.dot(img_array, sepia_matrix.T)
+        img_array = np.clip(img_array, 0, 255).astype(np.uint8)
+    elif filter_type == 'invert':
+        # Invert colors
+        img_array = 255 - img_array
+    elif filter_type == 'edges':
+        # Edge detection (simplified)
+        gray = np.dot(img_array[...,:3], [0.2989, 0.5870, 0.1140])
+        edges = np.abs(np.gradient(gray)[0]) + np.abs(np.gradient(gray)[1])
+        edges = np.clip(edges, 0, 255).astype(np.uint8)
+        img_array = np.stack([edges, edges, edges], axis=-1)
+    
+    return Image.fromarray(img_array)
+
+def process_frame(frame_data, filter_type='none'):
+    """Process frame data with selected filter"""
+    try:
+        # Decode base64 image
+        header, encoded = frame_data.split(",", 1)
+        image_data = base64.b64decode(encoded)
+        image = Image.open(BytesIO(image_data))
+        
+        # Apply filter
+        processed_image = apply_filter(image, filter_type)
+        
+        # Convert back to base64
+        buffered = BytesIO()
+        processed_image.save(buffered, format="JPEG")
+        processed_base64 = base64.b64encode(buffered.getvalue()).decode()
+        
+        return f"data:image/jpeg;base64,{processed_base64}"
+    except Exception as e:
+        print(f"Error processing frame: {str(e)}")
+        return frame_data  # Return original if error

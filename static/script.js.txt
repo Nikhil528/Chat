@@ -1,0 +1,437 @@
+// static/script.js
+document.addEventListener('DOMContentLoaded', () => {
+    const roomId = "{{ room_id }}";
+    const userId = generateUserId();
+    let username = `User_${Math.floor(Math.random() * 1000)}`;
+    document.getElementById('usernameDisplay').textContent = username;
+    
+    // Socket.IO connection
+    const socket = io();
+    
+    // DOM Elements
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const chatMessages = document.getElementById('chatMessages');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendMessage');
+    const userCount = document.getElementById('userCount');
+    const muteAudioBtn = document.getElementById('muteAudio');
+    const toggleVideoBtn = document.getElementById('toggleVideo');
+    const shareScreenBtn = document.getElementById('shareScreen');
+    const endCallBtn = document.getElementById('endCall');
+    const flaxBtns = document.querySelectorAll('.flax-btn');
+    
+    // WebRTC variables
+    let localStream;
+    let remoteStream;
+    let peerConnection;
+    const configuration = {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    };
+    
+    // State
+    let isMuted = false;
+    let isVideoOn = true;
+    let currentFilter = 'none';
+    let remoteUserId = null;
+    let processingInterval = null;
+    
+    // Initialize
+    init();
+    
+    async function init() {
+        try {
+            // Get user media
+            localStream = await navigator.mediaDevices.getUserMedia({ 
+                video: true, 
+                audio: true 
+            });
+            localVideo.srcObject = localStream;
+            
+            // Connect to Socket.IO room
+            socket.emit('join', { 
+                room_id: roomId, 
+                user_id: userId,
+                username: username,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Set up chat event listeners
+            setupChat();
+            
+            // Set up control button event listeners
+            setupControlButtons();
+            
+            // Set up flax filter buttons
+            setupFlaxFilters();
+        } catch (err) {
+            console.error('Error accessing media devices:', err);
+            alert('Error accessing camera and microphone.');
+        }
+    }
+    
+    function generateUserId() {
+        return 'user_' + Math.random().toString(36).substr(2, 9);
+    }
+    
+    function setupChat() {
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', e => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        
+        socket.on('chat_message', data => {
+            addMessage(data, false);
+        });
+    }
+    
+    function sendMessage() {
+        const message = messageInput.value.trim();
+        if (message) {
+            const timestamp = new Date().toISOString();
+            
+            // Emit to server
+            socket.emit('chat_message', {
+                user_id: userId,
+                message: message,
+                timestamp: timestamp
+            });
+            
+            // Add to local chat
+            addMessage({
+                user_id: userId,
+                username: username,
+                message: message,
+                timestamp: timestamp
+            }, true);
+            
+            messageInput.value = '';
+        }
+    }
+    
+    function addMessage(data, isSelf) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(isSelf ? 'self' : 'other');
+        
+        const date = new Date(data.timestamp);
+        const timeString = date.getHours() + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes();
+        
+        messageDiv.innerHTML = `
+            <div class="sender">${isSelf ? 'You' : data.username}</div>
+            <div class="text">${data.message}</div>
+            <div class="time">${timeString}</div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    function setupControlButtons() {
+        muteAudioBtn.addEventListener('click', () => {
+            isMuted = !isMuted;
+            localStream.getAudioTracks().forEach(track => {
+                track.enabled = !isMuted;
+            });
+            const icon = muteAudioBtn.querySelector('i');
+            if (isMuted) {
+                icon.classList.replace('fa-microphone', 'fa-microphone-slash');
+            } else {
+                icon.classList.replace('fa-microphone-slash', 'fa-microphone');
+            }
+        });
+        
+        toggleVideoBtn.addEventListener('click', () => {
+            isVideoOn = !isVideoOn;
+            localStream.getVideoTracks().forEach(track => {
+                track.enabled = isVideoOn;
+            });
+            const icon = toggleVideoBtn.querySelector('i');
+            if (isVideoOn) {
+                icon.classList.replace('fa-video-slash', 'fa-video');
+            } else {
+                icon.classList.replace('fa-video', 'fa-video-slash');
+            }
+        });
+        
+        shareScreenBtn.addEventListener('click', async () => {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+                    video: true 
+                });
+                const screenTrack = screenStream.getVideoTracks()[0];
+                
+                // Replace the local video track
+                const sender = peerConnection.getSenders().find(s => 
+                    s.track.kind === 'video'
+                );
+                if (sender) {
+                    sender.replaceTrack(screenTrack);
+                }
+                
+                // Stop the previous video track
+                localStream.getVideoTracks().forEach(track => track.stop());
+                
+                // Update local stream
+                localStream.removeTrack(localStream.getVideoTracks()[0]);
+                localStream.addTrack(screenTrack);
+                localVideo.srcObject = localStream;
+                
+                // Listen for when the screen sharing stops
+                screenTrack.onended = () => {
+                    // Switch back to camera
+                    switchBackToCamera();
+                };
+            } catch (err) {
+                console.error('Error sharing screen:', err);
+            }
+        });
+        
+        endCallBtn.addEventListener('click', () => {
+            // Close peer connection
+            if (peerConnection) {
+                peerConnection.close();
+            }
+            
+            // Stop local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Clear processing interval
+            if (processingInterval) {
+                clearInterval(processingInterval);
+            }
+            
+            // Notify server
+            socket.emit('leave', { 
+                user_id: userId,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Redirect or show message
+            alert('Call ended. You may close this window.');
+        });
+    }
+    
+    async function switchBackToCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            const cameraTrack = stream.getVideoTracks()[0];
+            
+            // Replace the screen track with camera track
+            const sender = peerConnection.getSenders().find(s => 
+                s.track.kind === 'video'
+            );
+            if (sender) {
+                sender.replaceTrack(cameraTrack);
+            }
+            
+            // Update local stream
+            localStream.getVideoTracks().forEach(track => track.stop());
+            localStream.removeTrack(localStream.getVideoTracks()[0]);
+            localStream.addTrack(cameraTrack);
+            localVideo.srcObject = localStream;
+        } catch (err) {
+            console.error('Error switching back to camera:', err);
+        }
+    }
+    
+    function setupFlaxFilters() {
+        flaxBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                flaxBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                document.getElementById('filterInfo').textContent = 
+                    `Filter applied: ${btn.textContent.trim()}`;
+                
+                // Start or stop processing based on filter
+                if (currentFilter !== 'none') {
+                    startVideoProcessing();
+                } else {
+                    stopVideoProcessing();
+                }
+            });
+        });
+    }
+    
+    function startVideoProcessing() {
+        if (processingInterval) {
+            clearInterval(processingInterval);
+        }
+        
+        // Process video frames at 10fps
+        processingInterval = setInterval(processVideoFrame, 100);
+    }
+    
+    function stopVideoProcessing() {
+        if (processingInterval) {
+            clearInterval(processingInterval);
+            processingInterval = null;
+        }
+        
+        // Revert to original stream
+        if (localStream) {
+            localVideo.srcObject = localStream;
+        }
+    }
+    
+    function processVideoFrame() {
+        const canvas = document.createElement('canvas');
+        canvas.width = localVideo.videoWidth;
+        canvas.height = localVideo.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(localVideo, 0, 0, canvas.width, canvas.height);
+        
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        
+        // Send to server for processing
+        fetch('/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                frame: dataUrl,
+                filter: currentFilter
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Create image from processed data
+                const img = new Image();
+                img.onload = () => {
+                    // Draw processed image to canvas
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // Create new stream from canvas
+                    const stream = canvas.captureStream(10);
+                    const videoTrack = stream.getVideoTracks()[0];
+                    
+                    // Replace the local video track
+                    const sender = peerConnection.getSenders().find(s => 
+                        s.track.kind === 'video'
+                    );
+                    if (sender) {
+                        sender.replaceTrack(videoTrack);
+                    }
+                };
+                img.src = data.processed_frame;
+            }
+        })
+        .catch(error => {
+            console.error('Error processing frame:', error);
+        });
+    }
+    
+    // WebRTC functions
+    socket.on('existing_users', users => {
+        // For simplicity, we'll connect to the first user we find
+        if (users.length > 0) {
+            remoteUserId = users[0].user_id;
+            createPeerConnection();
+        }
+    });
+    
+    socket.on('user_joined', data => {
+        // If we don't have a remote connection yet, connect to the new user
+        if (!remoteUserId) {
+            remoteUserId = data.user_id;
+            createPeerConnection();
+            
+            // Set remote username
+            document.getElementById('remoteUsername').textContent = data.username;
+        }
+    });
+    
+    socket.on('user_left', data => {
+        if (data.user_id === remoteUserId) {
+            // Reset remote connection
+            remoteUserId = null;
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            remoteVideo.srcObject = null;
+            document.getElementById('remoteUsername').textContent = 'Remote User';
+        }
+    });
+    
+    socket.on('user_count', data => {
+        userCount.textContent = data.count;
+    });
+    
+    function createPeerConnection() {
+        peerConnection = new RTCPeerConnection(configuration);
+        
+        // Add local stream tracks
+        localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+        });
+        
+        // When remote adds a stream
+        peerConnection.ontrack = event => {
+            remoteVideo.srcObject = event.streams[0];
+            remoteStream = event.streams[0];
+        };
+        
+        // ICE candidate handling
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) {
+                socket.emit('ice_candidate', {
+                    target_user_id: remoteUserId,
+                    candidate: event.candidate,
+                    sender_user_id: userId
+                });
+            }
+        };
+        
+        // Create offer
+        createOffer();
+    }
+    
+    async function createOffer() {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        
+        socket.emit('webrtc_offer', {
+            target_user_id: remoteUserId,
+            sdp: offer,
+            sender_user_id: userId
+        });
+    }
+    
+    socket.on('webrtc_offer', async data => {
+        if (!peerConnection) {
+            remoteUserId = data.sender_user_id;
+            createPeerConnection();
+        }
+        
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        
+        socket.emit('webrtc_answer', {
+            target_user_id: remoteUserId,
+            sdp: answer,
+            sender_user_id: userId
+        });
+    });
+    
+    socket.on('webrtc_answer', async data => {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    });
+    
+    socket.on('ice_candidate', async data => {
+        try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+            console.error('Error adding ICE candidate:', err);
+        }
+    });
+});
